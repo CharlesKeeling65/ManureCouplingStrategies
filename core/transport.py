@@ -2,6 +2,7 @@
 运输模型模块，提供各种粪肥养分运输策略的实现
 """
 
+import profile
 import time
 import logging
 import numpy as np
@@ -11,6 +12,8 @@ from scipy.optimize import linprog
 from scipy.sparse import csr_matrix
 from typing import List, Tuple, Dict, Optional, Union, Any
 import sys
+import rasterio as rio
+
 
 from ManureTransport.core.spatial import (
     DistanceStrategy,
@@ -52,6 +55,9 @@ class TransportModel:
         """
         if self.output_path is not None:
             self.output_path.mkdir(exist_ok=True, parents=True)
+            logging.info(f"输出目录已创建: {self.output_path}")
+        else:
+            logging.warning("未指定输出路径，无法保存结果")
 
     def optimize_allocation(self, sd_raster: np.ndarray, distance: int) -> np.ndarray:
         """
@@ -145,8 +151,9 @@ class TransportModel:
             )
 
             # 保存流量数据（如果提供了输出路径）
-            if self.output_path is not None:
-                self._save_flow_data(rows, cols, res.x, distance)
+            # TODO: 修改存储流数据为可选性
+            # if self.output_path is not None:
+            #     self._save_flow_data(rows, cols, res.x, distance)
 
             # 计算新的盈余/需求栅格
             delta_w = np.sign(w) * (A @ res.x)
@@ -157,6 +164,29 @@ class TransportModel:
             new_sd_raster = sd_raster
 
         return new_sd_raster
+
+    def _save_map_data(
+        self,
+        sd_raster: np.ndarray,
+        distance: int,
+        all_excre_P: np.ndarray,
+        Pdemand_tif: np.ndarray,
+        profile: Dict[str, Any],
+        out_path: Path,
+    ) -> None:
+        with rio.open(
+            out_path
+            / f"allocated_s_d_{self.resolution}km_d{distance*self.resolution}.tif",
+            "w",
+            **profile,
+        ) as dst:
+            save_sd_raster = np.where(
+                np.logical_and(all_excre_P == 0, Pdemand_tif == 0),
+                profile["nodata"],
+                sd_raster,
+            )
+            dst.write(save_sd_raster, 1)
+        pass
 
     def _save_flow_data(
         self, rows: np.ndarray, cols: np.ndarray, x: np.ndarray, distance: int
@@ -251,6 +281,63 @@ class TransportModel:
 class NormalTransportModel(TransportModel):
     """
     正常传输模型
+    """
+
+    def __init__(
+        self,
+        max_distance: Optional[int] = None,
+        **kwargs,
+    ):
+        """
+        初始化无限制传输模型
+
+        Args:
+            max_distance: 最大距离限制（单位：栅格单元），None表示无限制
+            **kwargs: 传递给父类的参数
+        """
+        super().__init__(distance_strategy=NormalDistanceStrategy(), **kwargs)
+        self.max_distance = max_distance
+
+    def run(
+        self, supply: np.ndarray, demand: np.ndarray
+    ) -> Tuple[np.ndarray, pd.DataFrame]:
+        """
+        运行无限制传输模型
+
+        Args:
+            supply: 供应栅格
+            demand: 需求栅格
+
+        Returns:
+            优化后的盈余-需求栅格和统计数据
+        """
+        # 计算盈余-需求栅格
+        sd_raster = supply - demand
+
+        # 记录初始状态
+        self.update_stats(sd_raster)
+
+        for d in range(1, self.max_distance + 1):
+
+            # 优化当前距离的分配
+            sd_raster = self.optimize_allocation(sd_raster, d)
+
+            # 更新统计数据
+            self.update_stats(sd_raster, d)
+
+            # 中间保存
+            self.save_stats(prefix="")
+
+        # 保存最终结果
+        self.save_stats(prefix="")
+
+        return sd_raster, pd.DataFrame(self.stats)
+
+
+class UnlimitedTransportModel(TransportModel):
+    """
+    无限传输模型
+    实现transport_unlimited.py中的方法，处理无限制传输
     """
 
     def __init__(
