@@ -14,8 +14,7 @@ import sys
 
 from ManureTransport.core.spatial import (
     DistanceStrategy,
-    UnlimitedDistanceStrategy,
-    SimpleDistanceStrategy,
+    NormalDistanceStrategy,
     move_array,
     edges_line_func,
 )
@@ -38,11 +37,11 @@ class TransportModel:
         初始化运输模型
 
         Args:
-            distance_strategy: 距离计算策略，如果为None则使用SimpleDistanceStrategy
+            distance_strategy: 距离计算策略，如果为None则使用NormalDistanceStrategy
             output_path: 输出路径，默认为None
             resolution: 栅格分辨率（千米），默认为1
         """
-        self.distance_strategy = distance_strategy or SimpleDistanceStrategy()
+        self.distance_strategy = distance_strategy or NormalDistanceStrategy()
         self.output_path = output_path
         self.resolution = resolution
         self.stats = {"distance": [], "surplus": [], "deficiency": []}
@@ -116,43 +115,46 @@ class TransportModel:
             f"距离 {distance} 连接收集完成，用时 {(end_time-start_time)/60:.3f} 分钟，"
             f"节点大小: {sys.getsizeof(rows)/(1024*1024):.2e} MB"
         )
+        try:
+            # 创建稀疏矩阵
+            A = csr_matrix(
+                (np.ones_like(rows), (rows, cols)),
+                shape=(X * Y, int(cols[-1]) + 1),
+                dtype=np.int8,
+            )
 
-        # 创建稀疏矩阵
-        A = csr_matrix(
-            (np.ones_like(rows), (rows, cols)),
-            shape=(X * Y, int(cols[-1]) + 1),
-            dtype=np.int8,
-        )
+            logging.info(
+                f"A矩阵大小: {sys.getsizeof(A)/(1024*1024):.2e} MB, "
+                f"形状: {X*Y} x {int(cols[-1])+1}, 非零行数: {len(np.nonzero(np.diff(A.indptr))[0])}"
+            )
 
-        logging.info(
-            f"A矩阵大小: {sys.getsizeof(A)/(1024*1024):.2e} MB, "
-            f"形状: {X*Y} x {int(cols[-1])+1}, 非零行数: {len(np.nonzero(np.diff(A.indptr))[0])}"
-        )
+            # 准备线性规划
+            w = sd_raster.reshape(-1)
+            c = -np.ones((1, A.shape[1]))
 
-        # 准备线性规划
-        w = sd_raster.reshape(-1)
-        c = -np.ones((1, A.shape[1]))
+            # 执行线性规划
+            start_time = time.time()
+            logging.info(f"线性规划-{distance} 开始")
 
-        # 执行线性规划
-        start_time = time.time()
-        logging.info(f"线性规划-{distance} 开始")
+            res = linprog(c, A, np.abs(w), bounds=(0, None))
 
-        res = linprog(c, A, np.abs(w), bounds=(0, None))
+            end_time = time.time()
+            logging.info(
+                f"线性规划-{distance} 结束，用时 {(end_time-start_time)/60:.3f} 分钟，"
+                f"delta: {res.fun/10**6:.5f} Mt"
+            )
 
-        end_time = time.time()
-        logging.info(
-            f"线性规划-{distance} 结束，用时 {(end_time-start_time)/60:.3f} 分钟，"
-            f"delta: {res.fun/10**6:.5f} Mt"
-        )
+            # 保存流量数据（如果提供了输出路径）
+            if self.output_path is not None:
+                self._save_flow_data(rows, cols, res.x, distance)
 
-        # 保存流量数据（如果提供了输出路径）
-        if self.output_path is not None:
-            self._save_flow_data(rows, cols, res.x, distance)
-
-        # 计算新的盈余/需求栅格
-        delta_w = np.sign(w) * (A @ res.x)
-        new_w = w - delta_w
-        new_sd_raster = new_w.reshape((X, Y))
+            # 计算新的盈余/需求栅格
+            delta_w = np.sign(w) * (A @ res.x)
+            new_w = w - delta_w
+            new_sd_raster = new_w.reshape((X, Y))
+        except Exception as e:
+            logging.error(f"线性规划失败: {e}")
+            new_sd_raster = sd_raster
 
         return new_sd_raster
 
@@ -246,11 +248,9 @@ class TransportModel:
         )  # 单位: Mt
 
 
-class UnlimitedTransportModel(TransportModel):
+class NormalTransportModel(TransportModel):
     """
-    基于无限制传输策略的模型
-
-    实现new_transport_unlimited.py中的方法，使用基于阈值的停止策略
+    正常传输模型
     """
 
     def __init__(
@@ -267,7 +267,7 @@ class UnlimitedTransportModel(TransportModel):
             max_distance: 最大距离限制（单位：栅格单元），None表示无限制
             **kwargs: 传递给父类的参数
         """
-        super().__init__(distance_strategy=UnlimitedDistanceStrategy(), **kwargs)
+        super().__init__(distance_strategy=NormalDistanceStrategy(), **kwargs)
         self.target_proportion = target_proportion
         self.max_distance = max_distance
 

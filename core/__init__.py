@@ -6,8 +6,7 @@ ManureTransport核心模块
 
 from ManureTransport.core.spatial import (
     DistanceStrategy,
-    UnlimitedDistanceStrategy,
-    SimpleDistanceStrategy,
+    NormalDistanceStrategy,
     move_array,
     edges_line_func,
     edges_weight_func,
