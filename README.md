@@ -1,118 +1,88 @@
-# ManureTransport - 粪便养分运输优化和分配库
+# Manure Coupling Strategies 算法库
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)
-![Python](https://img.shields.io/badge/python-3.6%2B-blue.svg)
+## 目录结构与功能说明（中英文）
 
-## 项目简介
-
-ManureTransport 是一个专为优化粪便养分运输和分配而设计的 Python 库。该库提供了一套完整的工具，用于解决农业领域中养殖场粪便资源向种植区的合理输送和分配问题，帮助农业生产实现资源的高效循环利用。
-
-## 主要功能
-
-- **空间分析**：提供多种距离策略和空间匹配算法
-- **运输优化**：基于不同约束条件的运输模型实现
-- **数据处理**：栅格数据读写、物种配置数据处理等功能
-- **可视化**：运输流向和养分分配结果的可视化支持
-
-## 安装方法
-
-```bash
-pip install ManureTransport
+```mermaid
+graph TD
+  A[ManureCouplingStrategies] --> B(core)
+  A --> C(io)
+  A --> D(utils)
+  B --> B1[transport.py]
+  B --> B2[redistribution.py]
+  C --> C1[raster.py]
+  C --> C2[vector.py]
+  D --> D1[geometry.py]
+  D --> D2[logging.py]
 ```
 
-## 快速入门
+---
 
-### 基本使用
+## 1. `core/` 核心算法 Core Algorithms
+
+- **transport.py**  
+  粪便运输空间分配算法（如线性规划、距离约束等）。  
+  Implements manure transport spatial allocation algorithms (e.g., linear programming, distance constraints).
+  - `optimal_allocation_linprog`：主分配函数，输入余缺栅格和最大运输距离，输出分配后余缺栅格。
+    - Main allocation function, input: supply-demand raster and max transport distance, output: allocated raster.
+  - 其他辅助函数如`direct_list`、`move_array`等。
+    - Other helpers: `direct_list`, `move_array`, etc.
+
+- **redistribution.py**  
+  畜禽再分配优化算法（如按行政区、畜种、线性规划等）。  
+  Implements livestock redistribution optimization (by region, species, linear programming, etc.).
+  - `update_inPs`：全局/分区再分配主函数。
+    - Main function for global/region-wise redistribution.
+  - `relocate`：按需求优先分配。
+    - Priority-based allocation by demand.
+
+---
+
+## 2. `io/` 数据读写与预处理 Data I/O & Preprocessing
+
+- **raster.py**  
+  栅格数据的读取、写入、掩膜等操作。  
+  Raster data reading, writing, masking, etc.
+- **vector.py**  
+  矢量数据（如行政区shp）的读取、处理。  
+  Vector data (e.g., administrative boundaries) reading and processing.
+
+---
+
+## 3. `utils/` 工具函数 Utilities
+
+- **geometry.py**  
+  空间分析、掩膜生成等。  
+  Spatial analysis, mask generation, etc.
+- **logging.py**  
+  日志、进度条等通用工具。  
+  Logging, progress bar, and other general utilities.
+
+---
+
+## 4. 主要函数接口示例 Example Main Function Interfaces
 
 ```python
-from ManureTransport.core.transport import SpeciesAverageTransportModel
-from ManureTransport.core.spatial import SimpleDistanceStrategy
-from ManureTransport.io.data_io import read_raster, write_raster
-from ManureTransport.utils.config import load_config
+# core/transport.py
+def optimal_allocation_linprog(sd_raster, distance, ...):
+    """主分配函数 Main allocation function for manure transport."""
 
-# 加载配置
-config = load_config('config.yaml')
-
-# 读取供需数据
-supply_data = read_raster('supply.tif')
-demand_data = read_raster('demand.tif')
-
-# 创建距离策略
-distance_strategy = SimpleDistanceStrategy(max_distance=50)  # 单位：公里
-
-# 创建运输模型
-transport_model = SpeciesAverageTransportModel(
-    supply_data=supply_data,
-    demand_data=demand_data,
-    distance_strategy=distance_strategy,
-    config=config
-)
-
-# 运行模型
-result = transport_model.solve()
-
-# 保存结果
-write_raster('allocation_result.tif', result.allocation)
+# core/redistribution.py
+def update_inPs(intensive_supply_1km_animal_matrix, adm_shp, adm_code_list, ...):
+    """主函数 Main function for livestock redistribution."""
 ```
 
-### 不同距离策略
+---
 
-```python
-# 不限制距离的策略
-from ManureTransport.core.spatial import UnlimitedDistanceStrategy
-unlimited_strategy = UnlimitedDistanceStrategy()
+## 设计说明 Design Notes
 
-# 自定义距离策略
-from ManureTransport.core.spatial import DistanceStrategy
+- **高内聚、低耦合 High Cohesion, Low Coupling**：核心算法、数据I/O、工具函数分离，便于维护和扩展。
+  - Core algorithms, data I/O, and utilities are separated for maintainability and extensibility.
+- **接口清晰 Clear Interfaces**：每个模块只暴露必要的主函数，便于主流程调用。
+  - Each module exposes only necessary main functions for easy integration.
+- **易于测试 Easy to Test**：可为每个模块单独编写单元测试。
+  - Each module can be unit tested independently.
 
-class CustomDistanceStrategy(DistanceStrategy):
-    def calculate_distance(self, source, target):
-        # 自定义距离计算逻辑
-        pass
-        
-    def is_within_limit(self, distance):
-        # 自定义距离限制判断逻辑
-        pass
-```
+---
 
-## API文档
-
-### 核心模块
-
-#### 空间分析模块 (core.spatial)
-
-- `DistanceStrategy`: 距离策略基类，提供距离计算接口
-- `UnlimitedDistanceStrategy`: 无限距离策略，不设置最大运输距离限制
-- `SimpleDistanceStrategy`: 简单距离策略，基于欧氏距离设定最大运输距离
-
-#### 运输模块 (core.transport)
-
-- `TransportModel`: 运输模型基类
-- `UnlimitedTransportModel`: 无限制运输模型
-- `SpeciesAverageTransportModel`: 基于物种平均值的运输模型
-
-### IO 模块
-
-- `read_raster`: 读取栅格数据
-- `write_raster`: 写入栅格数据
-- `read_species_data`: 读取物种参数配置数据
-
-### 工具模块
-
-- `setup_logging`: 配置日志系统
-- `load_config`: 加载配置文件
-- `get_default_species_config`: 获取默认物种配置
-
-## 贡献指南
-
-欢迎对本项目进行贡献！请遵循以下步骤:
-
-1. Fork 本仓库
-2. 创建您的特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交您的更改 (`git commit -m 'Add some amazing feature'`)
-4. 将您的更改推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建一个 Pull Request
-
-## 开源协议
-
-本项目基于 MIT 协议开源 - 详见 [LICENSE](LICENSE) 文件
+如需详细函数参数与用法，请参考各模块内的文档字符串和注释。
+For detailed function parameters and usage, please refer to the docstrings and comments in each module.
