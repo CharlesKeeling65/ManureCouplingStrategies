@@ -1,3 +1,7 @@
+from ManureCouplingStrategies.core import *
+from ManureCouplingStrategies.utils import *
+
+
 def main():
     print("Hello from manurecouplingstrategies!")
 
