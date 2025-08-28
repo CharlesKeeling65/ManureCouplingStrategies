@@ -106,7 +106,7 @@ def update_inPs(
         need2in_limit_S - need2in_inS,
     )
     need2in_delta_ub = -need2in_s
-    # 特殊处理
+
     need2in_delta_is_lb_ub_zeros_index = np.array([], dtype=np.int32)
     sd_list = [
         (
